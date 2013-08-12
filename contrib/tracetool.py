@@ -11,7 +11,6 @@ from collections import defaultdict
 from gpfstrace.analyze import TraceParser
 from IPython import embed
 
-
 def tree():
     return defaultdict(tree)
 
@@ -24,12 +23,13 @@ def main(args):
         tracelog = json.load(t)
         parser = TraceParser(tracelog)
     else:
+        #tracelog = lambda: defaultdict(tracelog)
         tracelog = tree()
         parser = TraceParser(tracelog)
         parser.parse_trace(args.filename, filters)
     
 
-    # write the io dictionary to a file in json format
+    # write the io dictionary to a compressed file in json format
     if args.tojson:
         gzipout = gzip.open(args.tojson, 'wb')
         json.dump(tracelog, gzipout)

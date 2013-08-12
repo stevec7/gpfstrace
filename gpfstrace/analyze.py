@@ -16,7 +16,7 @@ class TraceParser(object):
         # some regexes to filter out lines we don't want
         self.IORegex = ['QIO:', 'SIO:', 'FIO:']
         self.TSRegex = ['tscHandleMsgDirectly:', 'tscSendReply:', 'sendMessage',
-                        'tscSend:']
+                        'tscSend:', 'tscHandleMsg:']
         self._FILTER_MAP = {
                         'io':   'TRACE_IO',
                         'rdma': 'TRACE_RDMA',
@@ -165,6 +165,10 @@ class TraceParser(object):
         traceref = self.tracelog['trace_ts']
 
         if op == 'tscHandleMsgDirectly':
+            # we don't want the reply messages for now...
+            if l[7].strip('\'').strip('\',') == 'reply':
+                return
+
             msg_id = l[9].strip(',')
             oid = msg_id+':'+pid
             traceref[oid][op]['tracetime'] = float(l[0])
@@ -201,8 +205,23 @@ class TraceParser(object):
             traceref[oid][op]['state'] = l[17]
             #traceref[oid][op]['line'] = line
 
+            # as a bonus, try to build an ip -> nodename table
+            traceref['nodetable'][l[6]] = l[7].strip(':')
+
+        elif op =='tscHandleMsg':
+            msg_id = l[9].strip(',')
+            oid = msg_id+':'+pid
+            traceref[oid][op]['tracetime'] = float(l[0])
+            traceref[oid][op]['pid'] = pid
+            traceref[oid][op]['msg'] = l[7].strip('\'').strip('\',')
+            traceref[oid][op]['msg_id'] = msg_id
+            traceref[oid][op]['len'] = l[9]
+            traceref[oid][op]['node_id'] = l[11]
+            traceref[oid][op]['node_ip'] = l[12]
+            #traceref[oid][op]['line'] = line
+
         elif op == 'tscSend':
-            if "rc = 0x0" in line:  # useless line
+            if "rc = 0x" in line:  # useless line
                 return
             oid = l[13]+':'+pid
             traceref[oid][op]['tracetime'] = float(l[0])
@@ -226,6 +245,11 @@ class TraceParser(object):
 
         # okay, let's do something useful now
         for k in self.tracelog['trace_io'].keys():
+
+            # some of the traces don't contain 'qio', 'sio' and 'fio'
+            #   if so, don't bother looking at this...
+            if not self.tracelog['trace_io'][k].has_key('fio'):
+                continue
                         
             # the disk data was read/written to
             try:
@@ -237,7 +261,8 @@ class TraceParser(object):
 
             # some of the client logs don't have QIO/SIO for certain things
             #   like log writes, so check for those...
-            if self.tracelog['trace_io'][k].has_key('sio'):
+            if self.tracelog['trace_io'][k].has_key('sio') and \
+                    self.tracelog['trace_io'][k].has_key('fio'):
                 self.tracelog['trace_io'][k]['iotime'] = self.tracelog['trace_io'][k]['fio']['tracetime'] - \
                                 self.tracelog['trace_io'][k]['sio']['tracetime']
                 self.tracelog['trace_io']['disks'][disk]['iotimes'].setdefault(disk, []).append(
@@ -286,42 +311,79 @@ class TraceParser(object):
                 total_io_time = sum(v['iotimes'][k])
                 average_io_size = total_io_bytes / len(v['iosizes'][k])
                 average_io_time = total_io_time / len(v['iotimes'][k])
-                self.tracelog['trace_io']['disks'][k]['stats']['avg_io_tm'] = average_io_time
-                self.tracelog['trace_io']['disks'][k]['stats']['avg_io_sz'] = average_io_size
-                self.tracelog['trace_io']['disks'][k]['stats']['total_bytes_io'] = total_io_bytes
-                self.tracelog['trace_io']['disks'][k]['stats']['total_time_io'] = total_io_time
+                v['stats']['avg_io_tm'] = average_io_time
+                v['stats']['avg_io_sz'] = average_io_size
+                v['stats']['total_bytes_io'] = total_io_bytes
+                v['stats']['total_time_io'] = total_io_time
 
                 # so dirty, but it was late and I wanted to eat at 
                 #   McDonald's and read People magazine, so I was in a hurry
                 num_iops = len(v['num_iops'][k])
                 self.tracelog['trace_io']['disks'][k].pop('num_iops', None) # delete that stupid list
-                self.tracelog['trace_io']['disks'][k]['stats']['num_iops'] = num_iops
+                v['stats']['num_iops'] = num_iops
             except ZeroDivisionError as zde:
                 print "Zero Division error: {0}".format(zde)
-                pass
-
+                continue
 
         return
  
     def _assemble_ts_stats(self):
         """Takes raw tracelog dict and computes ts stats"""
 
-        return
-
         # okay, let's do something useful now
         for k,v in self.tracelog['trace_ts'].iteritems():
-            pass
-            #msg = v['msg']
-            #host = v['']
            
-            # get the number of messages sent, per type 'msg' field...
-            #   -received
-            #   -sent
-            #self.tracelog['trace_ts']['stats']['sent'][].setdefault(disk, []).append(1)
+            # messages received
+            if v.has_key('tscHandleMsgDirectly'):
+               
+                try:
+                    msg = v['tscHandleMsgDirectly']['msg']
+                    fromwho = v['tscHandleMsgDirectly']['node_ip']
 
-            # get number of messages received from which host
+                    if not self.tracelog['trace_ts']['stats']['received'].has_key(msg):
+                        self.tracelog['trace_ts']['stats']['received'][msg] = []
 
-            # get number of messages sent to which host
+                    self.tracelog['trace_ts']['stats']['received'][msg].append(fromwho)
+                except Exception as e:
+                    print "Exception in 'received', '{0}'".format(e)
+                    embed()
+                    sys.exit(0)
+
+            if v.has_key('tscHandleMsg'):
+                try:
+                    msg = v['tscHandleMsg']['msg']
+                    fromwho = v['tscHandleMsg']['node_ip']
+
+                    if not self.tracelog['trace_ts']['stats']['received'].has_key(msg):
+                        self.tracelog['trace_ts']['stats']['received'][msg] = []
+
+                    self.tracelog['trace_ts']['stats']['received'][msg].append(fromwho)
+                except Exception as e:
+                    print "Exception in 'received', '{0}'".format(e)
+                    embed()
+                    sys.exit(0)
+
+            # messages sent
+            if v.has_key('sendMessage'):
+
+                try:
+                    # need the 'msg' field from the tscSend operation
+                    if v['tscSend'].has_key('msg'):
+                        msg = v['tscSend']['msg']
+                    else:
+                        msg = v['tscSendReply']['msg']
+
+                    towho = v['sendMessage']['node_ip']
+
+                    if not self.tracelog['trace_ts']['stats']['sent'].has_key(msg):
+                        self.tracelog['trace_ts']['stats']['sent'][msg] = []
+
+                    self.tracelog['trace_ts']['stats']['sent'][msg].append(towho)
+                except Exception as e:
+                    print "Exception in 'sent', '{0}'".format(e)
+                    embed()
+                    sys.exit(0)
+
 
         return
 
@@ -337,13 +399,19 @@ class TraceParser(object):
         print "*"*80
         # summarize some disk stats
         for k in sorted(self.tracelog['trace_io']['disks'].keys()):
-            print "Disk: {0}, IOPS: {1}, Avg_IO_T: {2}, Avg_IO_Sz: {3}, Longest_IO: {4}, Total_Bytes: {5}, Total_IO_Time: {6}".format(
+            formatstr = "Disk: {0}, IOPS: {1}, Avg_IO_T: {2:.3f}, " + \
+                "Avg_IO_Sz: {3}, Longest_IO: {4:.3f}, Total_Bytes: {5}, " + \
+                "Total_IO_Time: {6:.3f}"
+            try:
+                print formatstr.format(
                 k, self.tracelog['trace_io']['disks'][k]['stats']['num_iops'], 
                 self.tracelog['trace_io']['disks'][k]['stats']['avg_io_tm'],
                 self.tracelog['trace_io']['disks'][k]['stats']['avg_io_sz'], 
                 self.tracelog['trace_io']['disks'][k]['stats']['longest_io'],
                 self.tracelog['trace_io']['disks'][k]['stats']['total_bytes_io'],
                 self.tracelog['trace_io']['disks'][k]['stats']['total_time_io'])
+            except ValueError as ve:
+                continue
 
             # gather some totals
             total_bytes += self.tracelog['trace_io']['disks'][k]['stats']['total_bytes_io']
@@ -353,7 +421,7 @@ class TraceParser(object):
         print
         print "Totals:"
         print "*"*80
-        print "Total Gigabytes Read/Written: {0}".format(float(total_bytes / 1024 / 1024 / 1024))
+        print "Total Gigabytes Read/Written: {0}".format(float(total_bytes) / 1024 / 1024 / 1024)
         print "Total IO Operations: {0}".format(total_iops)
         print "Total IO Trace Time: {0} secs".format(trace_elapsed_secs)
         print "Total GB/s: {0:.3f}".format(

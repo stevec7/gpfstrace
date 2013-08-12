@@ -15,11 +15,26 @@ class TraceParser(object):
 
         # some regexes to filter out lines we don't want
         self.IORegex = ['QIO:', 'SIO:', 'FIO:']
-        self.TSRegex = ['tscHandleMsgDirectly:', 'tscSendReply:', 'sendMessage'
+        self.TSRegex = ['tscHandleMsgDirectly:', 'tscSendReply:', 'sendMessage',
                         'tscSend:']
+        self._FILTER_MAP = {
+                        'io':   'TRACE_IO',
+                        'rdma': 'TRACE_RDMA',
+                        'ts':   'TRACE_TS',
+                        'brl':  'TRACE_BRL' 
+        }
 
 
-    def parse_trace(self, filename):
+    def parse_trace(self, filename, filters=None):
+
+        try:
+            # create a filter list
+            filter_list = [self._FILTER_MAP[i] for i in filters.split(',')]
+        except KeyError as ke:
+            print "Error, filter ({0}) is not a valid filter.".format(ke)
+            print "Please use the following filters: {0}".format(
+                    self._FILTER_MAP.keys())
+            sys.exit(1)
 
         # open the trace report file
         try:
@@ -40,12 +55,26 @@ class TraceParser(object):
                         ld[2], ld[3].split(':')[0], ld[3].split(':')[1], 
                         ld[3].split(':')[2])
                 # will be in epoch time...
-                self.trace_start_epoch = int(datetime.datetime.strptime(datearg, '%Y-%b-%d %H:%M:%S').strftime('%s'))
+                self.trace_start_epoch = int(datetime.datetime.strptime(
+                            datearg, '%Y-%b-%d %H:%M:%S').strftime('%s'))
                 skip += 1
                 continue
-            # this is to skip the lines 2-8. shameful to say the least...
-            elif skip > 0 and skip < 8:
+            elif skip == 1:
+                ld = line.split()[3:]   # longdate
+                datearg = "{0}-{1}-{2} {3}:{4}:{5}".format(ld[-1], ld[1], 
+                        ld[2], ld[3].split(':')[0], ld[3].split(':')[1], 
+                        ld[3].split(':')[2])
+                # will be in epoch time...
+                self.trace_stop_epoch = int(datetime.datetime.strptime(
+                            datearg, '%Y-%b-%d %H:%M:%S').strftime('%s'))
                 skip += 1
+                continue
+            # this is to skip the lines 3-8. shameful to say the least...
+            elif skip > 1 and skip < 8:
+                skip += 1
+                continue
+            elif line.split()[2].strip(':') not in filter_list:
+                # skip any lines we don't want
                 continue
             elif line.split()[2].strip(':') == 'TRACE_IO' and \
                 line.split()[3] in self.IORegex:
@@ -56,9 +85,11 @@ class TraceParser(object):
             else:
                 continue
 
-        # placeholder for assembling the stats
-        #_assemble_io_stats()
-        #_assemble_ts_stats()
+        # assemble the stats for enabled filters
+        if 'io' in filters.split(','):
+            self._assemble_io_stats()
+        #if 'ts' in filters.split(','):
+        #   self._assemble_ts_stats()
 
         return
 
@@ -77,8 +108,8 @@ class TraceParser(object):
 
         # the line formats vary, sigh...
         if op == 'QIO':
-            oid = l[17]
-            #oid = l[17]+":"+pid
+            #oid = l[17]
+            oid = l[17]+":"+pid
             traceref[oid]['qio']['pid'] = pid
             traceref[oid]['qio']['tracetime'] = float(l[0])
             traceref[oid]['qio']['diskid'] = l[15]
@@ -93,8 +124,8 @@ class TraceParser(object):
             traceref[oid]['qio']['tags'] = (l[7:9])
 
         elif op == 'SIO':
-            oid = l[12]
-            #oid = l[12]+":"+pid
+            #oid = l[12]
+            oid = l[12]+":"+pid
             traceref[oid]['sio']['tracetime'] = float(l[0])
             traceref[oid]['sio']['pid'] = pid
             traceref[oid]['sio']['diskid'] = l[10]
@@ -104,8 +135,8 @@ class TraceParser(object):
             #traceref[oid]['sio']['line'] = line
 
         elif op == 'FIO':
-            oid = l[17]
-            #oid = l[17]+":"+pid
+            #oid = l[17]
+            oid = l[17]+":"+pid
             traceref[oid]['fio']['tracetime'] = float(l[0])
             traceref[oid]['fio']['pid'] = pid
             traceref[oid]['fio']['diskid'] = l[15]
@@ -138,7 +169,7 @@ class TraceParser(object):
             oid = msg_id+':'+pid
             traceref[oid][op]['tracetime'] = float(l[0])
             traceref[oid][op]['pid'] = pid
-            traceref[oid][op]['msg'] = l[7].strip('\'')
+            traceref[oid][op]['msg'] = l[7].strip('\'').strip('\',')
             traceref[oid][op]['msg_id'] = msg_id
             traceref[oid][op]['len'] = l[11]
             traceref[oid][op]['node_id'] = l[13]
@@ -150,7 +181,7 @@ class TraceParser(object):
             oid = msg_id+':'+pid
             traceref[oid][op]['tracetime'] = float(l[0])
             traceref[oid][op]['pid'] = pid
-            traceref[oid][op]['msg'] = l[7].strip('\'')
+            traceref[oid][op]['msg'] = l[7].strip('\'').strip('\',')
             traceref[oid][op]['msg_id'] = msg_id
             traceref[oid][op]['replyLen'] = l[11]
             #traceref[oid][op]['line'] = line
@@ -176,7 +207,7 @@ class TraceParser(object):
             oid = l[13]+':'+pid
             traceref[oid][op]['tracetime'] = float(l[0])
             traceref[oid][op]['pid'] = pid
-            traceref[oid][op]['msg'] = l[7].strip('\'')
+            traceref[oid][op]['msg'] = l[7].strip('\'').strip('\',')
             traceref[oid][op]['n_dest'] = l[9]
             traceref[oid][op]['data_len'] = l[11]
             traceref[oid][op]['msg_id'] = l[13]
@@ -203,8 +234,6 @@ class TraceParser(object):
             except TypeError as te:
                 print "Type error: {0}".format(te)
                 print self.tracelog['trace_io'][k]
-                embed()
-                sys.exit(1)
 
             # some of the client logs don't have QIO/SIO for certain things
             #   like log writes, so check for those...
@@ -215,7 +244,8 @@ class TraceParser(object):
                         float(self.tracelog['trace_io'][k]['iotime']))
 
             # figure out how long the IO was queued...
-            if self.tracelog['trace_io'][k].has_key('qio') and self.tracelog['trace_io'][k].has_key('sio'):
+            if self.tracelog['trace_io'][k].has_key('qio') and \
+                    self.tracelog['trace_io'][k].has_key('sio'):
                 io_time_in_queue = self.tracelog['trace_io'][k]['sio']['tracetime'] - \
                                    self.tracelog['trace_io'][k]['qio']['tracetime']
                 self.tracelog['trace_io'][k]['time_in_queue'] = io_time_in_queue
@@ -229,8 +259,10 @@ class TraceParser(object):
 
             # increment the disks bucket per FIO
             try:
-                self.tracelog['trace_io']['disks'][disk]['num_iops'].setdefault(disk, []).append(1)
-                self.tracelog['trace_io']['disks'][disk]['iosizes'].setdefault(disk, []).append(int(self.tracelog['trace_io'][k]['iosize']))
+                self.tracelog['trace_io']['disks'][disk]['num_iops'].setdefault(
+                        disk, []).append(1)
+                self.tracelog['trace_io']['disks'][disk]['iosizes'].setdefault(
+                        disk, []).append(int(self.tracelog['trace_io'][k]['iosize']))
             except TypeError as te:
                 print "Hit a bug: {0}".format(te)
                 pass
@@ -274,14 +306,35 @@ class TraceParser(object):
     def _assemble_ts_stats(self):
         """Takes raw tracelog dict and computes ts stats"""
 
+        return
+
         # okay, let's do something useful now
         for k,v in self.tracelog['trace_ts'].iteritems():
             pass
+            #msg = v['msg']
+            #host = v['']
+           
+            # get the number of messages sent, per type 'msg' field...
+            #   -received
+            #   -sent
+            #self.tracelog['trace_ts']['stats']['sent'][].setdefault(disk, []).append(1)
 
+            # get number of messages received from which host
+
+            # get number of messages sent to which host
+
+        return
 
     def print_disk_summary(self):
-        """Print out s summary of disk statistics..."""
+        """Print out a summary of disk statistics..."""
 
+        # totals
+        total_bytes = 0
+        total_iops = 0
+        trace_elapsed_secs = self.trace_stop_epoch - self.trace_start_epoch
+
+        print "Disk Summary:"
+        print "*"*80
         # summarize some disk stats
         for k in sorted(self.tracelog['trace_io']['disks'].keys()):
             print "Disk: {0}, IOPS: {1}, Avg_IO_T: {2}, Avg_IO_Sz: {3}, Longest_IO: {4}, Total_Bytes: {5}, Total_IO_Time: {6}".format(
@@ -291,4 +344,18 @@ class TraceParser(object):
                 self.tracelog['trace_io']['disks'][k]['stats']['longest_io'],
                 self.tracelog['trace_io']['disks'][k]['stats']['total_bytes_io'],
                 self.tracelog['trace_io']['disks'][k]['stats']['total_time_io'])
+
+            # gather some totals
+            total_bytes += self.tracelog['trace_io']['disks'][k]['stats']['total_bytes_io']
+            total_iops += self.tracelog['trace_io']['disks'][k]['stats']['num_iops']
+
+        print
+        print
+        print "Totals:"
+        print "*"*80
+        print "Total Gigabytes Read/Written: {0}".format(float(total_bytes / 1024 / 1024 / 1024))
+        print "Total IO Operations: {0}".format(total_iops)
+        print "Total IO Trace Time: {0} secs".format(trace_elapsed_secs)
+        print "Total GB/s: {0:.3f}".format(
+                float(total_bytes / 1024 / 1024 / 1024) / float(trace_elapsed_secs))
 

@@ -27,7 +27,6 @@ def main(args):
         tracelog = tree()
         parser = TraceParser(tracelog)
         parser.parse_trace(args.filename, filters)
-    
 
     # write the io dictionary to a compressed file in json format
     if args.tojson:
@@ -55,7 +54,7 @@ if __name__ == '__main__':
                         dest='traceinput',
                         required=False,
                         help='instead of reading a tracefile, pass in a json dump.')
-    parser.add_argument('--filter',
+    parser.add_argument('--filters',
                         dest='filters',
                         required=False,
                         default='io',

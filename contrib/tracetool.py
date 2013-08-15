@@ -19,13 +19,12 @@ def main(args):
     filters = args.filters
 
     if args.traceinput:     # this currently crashes on my vm...
-        t = gzip.open(args.traceinput, 'r')
-        tracelog = json.load(t)
+        j = gzip.open(args.traceinput, 'r')
+        tracelog = json.load(j, args.verbose)
         parser = TraceParser(tracelog)
     else:
-        #tracelog = lambda: defaultdict(tracelog)
-        tracelog = tree()
-        parser = TraceParser(tracelog)
+        tracelog = lambda: defaultdict(tracelog)   # look how cool I am
+        parser = TraceParser(tracelog(), args.verbose)
         parser.parse_trace(args.filename, filters)
 
     # write the io dictionary to a compressed file in json format
@@ -33,6 +32,9 @@ def main(args):
         gzipout = gzip.open(args.tojson, 'wb')
         json.dump(tracelog, gzipout)
         gzipout.close()
+
+    if args.printsum:
+        pass
 
     if args.interactive:
         embed()
@@ -60,10 +62,21 @@ if __name__ == '__main__':
                         default='io',
                         help='command sep list of filters. Valid values: ' + \
                             'io,ts,rdma,brl')
+    parser.add_argument('--print',
+                        dest='printsum',
+                        required=False,
+                        help='Print summaries. Valid values: ' + \
+                            'io,ts,rdma,brl')
     parser.add_argument('--tojson',
                         dest='tojson',
                         required=False,
                         help='write dictionary to a json file')
+    parser.add_argument('-v', '--verbose',
+                        dest='verbose',
+                        default=False,
+                        required=False,
+                        action='store_true',
+                        help='show verbose stats (can be spammy)')
     args = parser.parse_args()
 
     main(args)

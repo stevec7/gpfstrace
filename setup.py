@@ -6,12 +6,12 @@ except:
 
     
 setup(
-    name = 'gpfstrace',
+    name = 'gpfs',
     version = '0.0.1',
-    description = 'libraries for analyzing GPFS trace logs',
+    description = 'libraries for GPFS',
     author = 'stevec7',
     author_email = 'none',
-    packages = ['gpfstrace']
+    packages = ['gpfs']
 
 
 
